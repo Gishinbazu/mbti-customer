@@ -1,0 +1,12 @@
+node_modules/
+.expo/
+.expo-shared/
+web-build/
+dist/
+build/
+tmp/
+*.log
+.DS_Store
+.vscode/
+.idea/
+.env

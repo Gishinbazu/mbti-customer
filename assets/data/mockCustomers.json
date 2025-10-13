@@ -1,0 +1,50 @@
+[
+  {
+    "id": "1",
+    "name": "Alice",
+    "region": "서울",
+    "age_group": "20s",
+    "month": "2025-06",
+    "visit_days": 10,
+    "avg_duration_min": 50,
+    "retained_june_august": true,
+    "retained_90": true,
+    "payment_amount": 35000
+  },
+  {
+    "id": "2",
+    "name": "Bob",
+    "region": "부산",
+    "age_group": "30s",
+    "month": "2025-07",
+    "visit_days": 3,
+    "avg_duration_min": 25,
+    "retained_june_august": false,
+    "retained_90": false,
+    "payment_amount": 12000
+  },
+  {
+    "id": "3",
+    "name": "Choi",
+    "region": "대전",
+    "age_group": "40s",
+    "month": "2025-08",
+    "visit_days": 6,
+    "avg_duration_min": 80,
+    "retained_june_august": true,
+    "retained_90": false,
+    "payment_amount": 54000
+  },
+  {
+    "id": "4",
+    "name": "Dina",
+    "region": "서울",
+    "age_group": "20s",
+    "month": "2025-08",
+    "visit_days": 14,
+    "avg_duration_min": 35,
+    "retained_june_august": false,
+    "retained_90": true,
+    "payment_amount": 27000
+  }
+]
