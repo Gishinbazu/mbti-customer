@@ -10,26 +10,29 @@ import { StoreProvider } from '../lib/store';
 
 export default function RootLayout() {
   const pathname = usePathname();
-  const isWelcome = pathname === '/welcome';
+
+  // La welcome est sous le groupe (public)
+  const isWelcome = pathname === '/(public)/welcome';
+  const inTabs = pathname.startsWith('/(tabs)');
+
+  // Chrome (header/footer/spacer) masqué sur welcome et sur toutes les tabs
+  const showChrome = !isWelcome && !inTabs;
 
   return (
     <SafeAreaProvider>
       <StoreProvider>
         <View style={{ flex: 1, backgroundColor: '#f8fafc' }}>
-          {/* Header global (se cache lui-même sur /(tabs) et mobile) */}
-          {!isWelcome && <GlobalHeader />}
+          {showChrome && <GlobalHeader />}
+          {showChrome && <HeaderSpacer />}
 
-          {/* Espace sous le header fixe (web large, hors tabs) */}
-          {!isWelcome && <HeaderSpacer />}
-
-          {/* Navigation (welcome puis tabs) */}
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="welcome" />
-            <Stack.Screen name="(tabs)" />
+          <Stack initialRouteName="(public)" screenOptions={{ headerShown: false }}>
+            {/* Groupe public (contient welcome) */}
+            <Stack.Screen name="(public)" />
+            {/* 👉 On n’enregistre (tabs) que si on y est déjà, pour éviter toute frame de flash */}
+            {inTabs && <Stack.Screen name="(tabs)" />}
           </Stack>
 
-          {/* Footer global (se cache lui-même sur /(tabs) et mobile) */}
-          {!isWelcome && <GlobalFooter />}
+          {showChrome && <GlobalFooter />}
         </View>
       </StoreProvider>
     </SafeAreaProvider>

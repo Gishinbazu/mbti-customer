@@ -16,7 +16,12 @@ import { VictoryPie } from 'victory-native';
 import Screen from '../../components/Screen';
 import TopBar from '../../components/TopBar';
 import TypeBadge from '../../components/TypeBadge';
-import { classify, nextRepurchaseEtaDays, thresholdsFromData } from '../../lib/slassifier';
+import {
+  classifyRobust,
+  nextRepurchaseEtaDays,
+  robustThresholdsFromData,
+  thresholdsFromData
+} from '../../lib/metrics';
 import { useStore } from '../../lib/store';
 
 type Code = 'LOYAL' | 'BROWSER' | 'SNIPER' | 'CHURN';
@@ -45,8 +50,9 @@ const RECO_BY_TYPE: Record<Code, string[]> = {
 export default function Analysis() {
   const { customers, loaded, loadMock } = useStore();
 
-  // Seuils dynamiques depuis la data
-  const th = useMemo(() => thresholdsFromData(customers || []), [customers]);
+  // Seuils (moyenne pour compat + médiane pour robustesse)
+  const thMean = useMemo(() => thresholdsFromData(customers || []), [customers]);
+  const thRobust = useMemo(() => robustThresholdsFromData(customers || []), [customers]);
 
   // Form inputs
   const [input, setInput] = useState({ ...DEFAULT_INPUT });
@@ -57,15 +63,17 @@ export default function Analysis() {
     return Number.isFinite(n) ? n : 0;
   };
 
-  // Classification + ETA
-  const result = classify({ ...input }, th) as ClassifyResult;
-  const eta = nextRepurchaseEtaDays(input);
+  // Classification (robuste) + ETA (avec seuils robustes)
+  const robust = classifyRobust({ ...input }, customers || []);
+  // Pour compatibilité avec ton TypeBadge + textes existants
+  const result: ClassifyResult = { code: robust.code, label: robust.label, desc: robust.desc };
+  const eta = nextRepurchaseEtaDays(input, thRobust);
 
   // Distribution globale (camembert)
   const dist = useMemo(() => {
     const map: Record<Code, number> = { LOYAL: 0, BROWSER: 0, SNIPER: 0, CHURN: 0 };
     (customers || []).forEach((c: any) => {
-      const r = classify(c, th) as ClassifyResult;
+      const r = classifyRobust(c, customers || []);
       map[r.code] += 1;
     });
     return [
@@ -74,7 +82,7 @@ export default function Analysis() {
       { x: '기습형', y: map.SNIPER },
       { x: '이탈형', y: map.CHURN },
     ];
-  }, [customers, th]);
+  }, [customers]);
 
   const empty = !customers || customers.length === 0;
   const resetInputs = () => setInput({ ...DEFAULT_INPUT });
@@ -145,7 +153,13 @@ export default function Analysis() {
           {QUICK_PRESETS.map((p) => (
             <Pressable
               key={p.name}
-              onPress={() => setInput((prev) => ({ ...prev, visit_days: p.visit_days, avg_duration_min: p.avg_duration_min }))}
+              onPress={() =>
+                setInput((prev) => ({
+                  ...prev,
+                  visit_days: p.visit_days,
+                  avg_duration_min: p.avg_duration_min,
+                }))
+              }
               style={({ pressed }) => [styles.presetBtn, pressed && { opacity: 0.85 }]}
             >
               <Text style={styles.presetText}>{p.name}</Text>
@@ -204,8 +218,15 @@ export default function Analysis() {
         {/* Résultat typologie */}
         <View style={styles.card}>
           <Text style={styles.h3}>결과</Text>
+          {/* TypeBadge: garde ton API (type + label) */}
           <TypeBadge type={result.code} label={`당신은 ${result.label} 고객입니다!`} />
           {!!result.desc && <Text style={{ marginTop: 8, color: '#475569' }}>{result.desc}</Text>}
+          {/* Explication robuste (facultatif, utile pour démo) */}
+          {!!robust?.why && (
+            <Text style={{ marginTop: 6, color: '#64748b' }}>
+              근거: {robust.why}
+            </Text>
+          )}
           <Text style={{ marginTop: 6, fontWeight: '600' }}>다음 재구매 예상: {eta}일 내</Text>
         </View>
 

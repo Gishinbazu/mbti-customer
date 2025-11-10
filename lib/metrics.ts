@@ -43,11 +43,31 @@ export type KPI = {
 const toNum = (v: unknown, fallback = 0) =>
   Number.isFinite(Number(v)) ? Number(v) : fallback;
 
+const sum = (arr: number[]) => arr.reduce((s, n) => s + n, 0);
+
 const safeAvg = (nums: number[]) =>
-  nums.length ? nums.reduce((s, n) => s + n, 0) / nums.length : 0;
+  nums.length ? sum(nums) / nums.length : 0;
 
 const keyOf = (v: unknown) =>
   v === undefined || v === null || v === '' ? 'UNKNOWN' : String(v);
+
+const round = (n: number, d = 2) =>
+  Number.isFinite(n) ? Number(n.toFixed(d)) : 0;
+
+const median = (arr: number[]) => {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+};
+
+const mad = (arr: number[]) => {
+  if (!arr.length) return 1;
+  const m = median(arr);
+  const dev = arr.map((x) => Math.abs(x - m));
+  // renvoie au moins 1 pour éviter division par zéro
+  return Math.max(median(dev), 1);
+};
 
 // -------- groupBy (clé ou fonction de prédicat) --------
 export function groupBy<T>(
@@ -65,8 +85,8 @@ export function groupBy<T>(
   return out;
 }
 
-// -------- thresholdsFromData --------
-// Simple mais robuste : moyenne avec garde pour tableaux vides.
+// -------- thresholdsFromData (moyenne) --------
+// Simple et compatible : moyenne, avec garde pour tableaux vides.
 export function thresholdsFromData(data: Customer[]): Thresholds {
   const visits = (data ?? []).map((c) => toNum(c.visit_days));
   const durs = (data ?? []).map((c) => toNum(c.avg_duration_min));
@@ -76,7 +96,18 @@ export function thresholdsFromData(data: Customer[]): Thresholds {
   };
 }
 
-// -------- classify --------
+// -------- robustThresholdsFromData (médiane) --------
+// Plus robuste aux valeurs extrêmes (outliers).
+export function robustThresholdsFromData(data: Customer[]): Thresholds {
+  const visits = (data ?? []).map((c) => toNum(c.visit_days));
+  const durs = (data ?? []).map((c) => toNum(c.avg_duration_min));
+  return {
+    visit_days: median(visits),
+    avg_duration_min: median(durs),
+  };
+}
+
+// -------- classify (version moyenne – rétrocompat) --------
 export function classify(customer: Customer, thresholds: Thresholds): ClassifyResult {
   const v = toNum(customer.visit_days);
   const d = toNum(customer.avg_duration_min);
@@ -86,12 +117,52 @@ export function classify(customer: Customer, thresholds: Thresholds): ClassifyRe
   if (v > tv && d > td) {
     return { code: 'LOYAL',  label: '충성형', desc: '자주 방문하고 체류시간이 긴 고객' };
   } else if (d > td) {
-    return { code: 'BROWSER', label: '눈팅형', desc: '자주 보지만 덜 구매하는 고객' };
+    return { code: 'BROWSER', label: '눈팅형', desc: '많이 보지만 덜 구매하는 고객' };
   } else if (v > tv) {
     return { code: 'SNIPER', label: '기습형', desc: '가끔 방문하지만 확실히 구매하는 고객' };
   } else {
     return { code: 'CHURN',  label: '이탈형', desc: '방문도 적고 체류시간도 짧은 고객' };
   }
+}
+
+// -------- classifyRobust (médiane + MAD, avec raisonnement) --------
+export function classifyRobust(customer: Customer, cohort: Customer[]): ClassifyResult & {
+  why: string;
+  scores: { attendanceZ: number; repurchaseZ?: number };
+} {
+  const vd = (cohort ?? []).map((x) => toNum(x.visit_days));
+  const dur = (cohort ?? []).map((x) => toNum(x.avg_duration_min));
+
+  const vZ = (toNum(customer.visit_days) - median(vd)) / mad(vd);
+  const dZ = (toNum(customer.avg_duration_min) - median(dur)) / mad(dur);
+
+  // score de présence = moyenne des z-scores de visite et durée
+  const attendanceZ = (vZ + dZ) / 2;
+
+  // Rachat récent (si dispo) -> boost implicite
+  const repurchaseFlag = customer.retained_90 || customer.retained_june_august;
+  const repurchaseZ = repurchaseFlag ? 0.5 : -0.25; // heuristique douce
+
+  const attendanceHigh = attendanceZ >= 0;
+  const repHigh = repurchaseZ >= 0;
+
+  let res: ClassifyResult;
+  if (attendanceHigh && repHigh) {
+    res = { code: 'LOYAL',  label: '충성형', desc: '자주 방문 + 재구매 가능성 높음' };
+  } else if (attendanceHigh && !repHigh) {
+    res = { code: 'BROWSER', label: '눈팅형', desc: '체류/방문은 높지만 재구매 신호는 약함' };
+  } else if (!attendanceHigh && repHigh) {
+    res = { code: 'SNIPER', label: '기습형', desc: '방문 빈도는 낮지만 구매 전환이 있음' };
+  } else {
+    res = { code: 'CHURN',  label: '이탈형', desc: '방문/체류 및 재구매 신호 모두 약함' };
+  }
+
+  const why =
+    `attendanceZ=${round(attendanceZ, 2)} ` +
+    `(visitZ=${round(vZ, 2)}, durZ=${round(dZ, 2)}), ` +
+    `repurchaseBias=${round(repurchaseZ, 2)}`;
+
+  return { ...res, why, scores: { attendanceZ, repurchaseZ } };
 }
 
 // -------- KPIs de haut niveau --------
@@ -104,16 +175,16 @@ export function kpis(customers: Customer[]): KPI {
   const retained = customers.filter((c) => !!c.retained_90 || !!c.retained_june_august).length;
 
   const revenueVals = customers.map((c) => toNum(c.payment_amount, 0));
-  const revenue = revenueVals.reduce((s, n) => s + n, 0);
-  const arpu = revenue / total;
+  const revenue = sum(revenueVals);
+  const arpu = total ? revenue / total : 0;
 
   return {
     total,
-    avgVisit: safeAvg(visits),
-    avgDuration: safeAvg(durs),
-    repurch: (retained * 100) / total,
-    revenue,
-    arpu,
+    avgVisit: round(safeAvg(visits), 2),
+    avgDuration: round(safeAvg(durs), 2),
+    repurch: round((retained * 100) / total, 1),
+    revenue: round(revenue, 2),
+    arpu: round(arpu, 2),
   };
 }
 

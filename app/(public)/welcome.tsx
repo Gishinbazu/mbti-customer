@@ -22,10 +22,17 @@ export default function Welcome() {
   const [saving, setSaving] = useState(false);
 
   const continueToApp = useCallback(async () => {
-    if (saving) return; // extra guard
+    if (saving) return;
     try {
       setSaving(true);
       await AsyncStorage.setItem('onboarded', '1');
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        try {
+          window.localStorage?.setItem('onboarded', '1'); // évite tout flash futur côté web
+        } catch {
+          // ignore
+        }
+      }
       router.replace('/(tabs)/home');
     } finally {
       setSaving(false);
@@ -54,7 +61,7 @@ export default function Welcome() {
             </Text>
           </View>
           <Image
-            // Adjust this path if your file sits elsewhere
+            // Ajuste ce chemin selon l’emplacement réel de ton image
             source={require('../../assets/images/welcome-icon.png')}
             style={styles.heroImage}
             resizeMode="contain"
@@ -107,13 +114,6 @@ function Feature({ title, desc }: { title: string; desc: string }) {
   );
 }
 
-const shadow =
-  Platform.select({
-    ios: { shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 8 } },
-    android: { elevation: 4 },
-    default: {},
-  }) || {};
-
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 16 },
   hero: {
@@ -123,7 +123,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    ...shadow,
   },
   title: { color: '#e5e7eb', fontSize: 22, fontWeight: '900', letterSpacing: -0.3 },
   subtitle: { color: '#cbd5e1', marginTop: 6, lineHeight: 20 },

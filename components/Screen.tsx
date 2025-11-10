@@ -1,48 +1,109 @@
-import React from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
+// components/Screen.tsx
+import React, { forwardRef, memo } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  ScrollViewProps,
+  StyleProp,
+  View,
+  ViewStyle,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Props = {
   children: React.ReactNode;
-  /** active le scroll sur l’écran */
+
+  /** Active le scroll sur l’écran */
   scroll?: boolean;
-  /** espace en haut (ex: si header global fixé sur le web) */
+
+  /** Espace en haut (ex: si header global est fixé sur le web) */
   extraTop?: number;
-  /** espace en bas (ex: pour la floating bar) */
+
+  /** Espace en bas (ex: pour une tab bar flottante) */
   extraBottom?: number;
-  /** padding horizontal par défaut */
+
+  /** Padding horizontal par défaut */
   px?: number;
+
+  /** Couleur de fond (défaut: #f8fafc) */
+  backgroundColor?: string;
+
+  /** Style externe pour le container (ScrollView ou View) */
+  style?: StyleProp<ViewStyle>;
+
+  /** Style appliqué au contentContainer (quand scroll = true) */
+  contentContainerStyle?: StyleProp<ViewStyle>;
+
+  /** Props supplémentaires à passer au ScrollView */
+  scrollProps?: Partial<ScrollViewProps>;
 };
 
-export default function Screen({
-  children,
-  scroll = false,
-  extraTop = 0,
-  extraBottom = 0,
-  px = 16,
-}: Props) {
+/**
+ * Écran générique avec Safe Area, padding cohérent, gestion du clavier et option scroll.
+ * - iOS: KeyboardAvoidingView 'padding' (soulève le contenu avec le clavier)
+ * - Android: comportement par défaut (évite les glitches avec certaines vues)
+ * - Web: insets = 0, mais extraTop/extraBottom restent appliqués
+ */
+const Screen = forwardRef<ScrollView, Props>(function Screen(
+  {
+    children,
+    scroll = false,
+    extraTop = 0,
+    extraBottom = 0,
+    px = 16,
+    backgroundColor = '#f8fafc',
+    style,
+    contentContainerStyle,
+    scrollProps,
+  },
+  ref
+) {
   const insets = useSafeAreaInsets();
 
-  const styleBase = {
+  const baseStyle: ViewStyle = {
     flex: 1,
-    backgroundColor: '#f8fafc',
-    paddingTop: insets.top + extraTop,
-    paddingBottom: insets.bottom + extraBottom,
-  } as const;
+    backgroundColor,
+    paddingTop: (insets?.top ?? 0) + extraTop,
+    paddingBottom: (insets?.bottom ?? 0) + extraBottom,
+  };
 
-  const Container = scroll ? ScrollView : View;
+  // Contenu non scrollable : on garde un seul niveau de padding horizontal
+  if (!scroll) {
+    return (
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+      >
+        <View style={[baseStyle, style]}>
+          <View style={{ flex: 1, paddingHorizontal: px }}>{children}</View>
+        </View>
+      </KeyboardAvoidingView>
+    );
+  }
 
+  // Contenu scrollable : padding horizontal sur le contentContainer
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1 }}
     >
-      <Container
-        style={styleBase as any}
-        contentContainerStyle={scroll ? { paddingHorizontal: px, paddingBottom: 12 } : undefined}
+      <ScrollView
+        ref={ref}
+        style={[baseStyle, style]}
+        contentContainerStyle={[
+          { paddingHorizontal: px, paddingBottom: 12, flexGrow: 1 },
+          contentContainerStyle,
+        ]}
+        showsVerticalScrollIndicator={false}
+        keyboardDismissMode={Platform.OS === 'ios' ? 'on-drag' : 'none'}
+        keyboardShouldPersistTaps="handled"
+        {...scrollProps}
       >
-        {!scroll ? <View style={{ flex: 1, paddingHorizontal: px }}>{children}</View> : children}
-      </Container>
+        {children}
+      </ScrollView>
     </KeyboardAvoidingView>
   );
-}
+});
+
+export default memo(Screen);

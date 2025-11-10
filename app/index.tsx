@@ -1,16 +1,20 @@
 // app/index.tsx
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Redirect, type Href } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, View } from 'react-native';
 
-type Dest = '/welcome' | '/(tabs)/home';
+type Dest = '/(public)/welcome' | '/(tabs)/home';
 
 function normalizeFlag(v: unknown): boolean {
   if (typeof v !== 'string') return false;
   const s = v.trim().toLowerCase();
   return s === '1' || s === 'true' || s === 'yes';
 }
+
+// Empêche le splash de disparaître avant qu’on décide où aller
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function Index() {
   const [dest, setDest] = useState<Dest | null>(null);
@@ -19,26 +23,28 @@ export default function Index() {
     let alive = true;
 
     (async () => {
-      try {
-        // 1) AsyncStorage (mobile + web)
-        const v = await AsyncStorage.getItem('onboarded');
-
-        // 2) Fallback localStorage (web uniquement)
-        let webV: string | null = null;
-        if (Platform.OS === 'web' && typeof window !== 'undefined' && 'localStorage' in window) {
-          try {
-            webV = window.localStorage.getItem('onboarded');
-          } catch {
-            // ignore
+      // 1) Web: décider immédiatement via localStorage si possible
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        try {
+          const webV = window.localStorage?.getItem('onboarded');
+          if (webV != null) {
+            if (!alive) return;
+            setDest(normalizeFlag(webV) ? '/(tabs)/home' : '/(public)/welcome');
+            return; // Pas besoin d’attendre AsyncStorage
           }
+        } catch {
+          // ignore
         }
+      }
 
-        const isOnboarded = normalizeFlag(v) || normalizeFlag(webV || '');
+      // 2) Fallback: AsyncStorage (mobile + web si rien en localStorage)
+      try {
+        const v = await AsyncStorage.getItem('onboarded');
         if (!alive) return;
-        setDest(isOnboarded ? '/(tabs)/home' : '/welcome');
+        setDest(normalizeFlag(v) ? '/(tabs)/home' : '/(public)/welcome');
       } catch {
         if (!alive) return;
-        setDest('/welcome');
+        setDest('/(public)/welcome');
       }
     })();
 
@@ -47,11 +53,18 @@ export default function Index() {
     };
   }, []);
 
-  // Écran de boot minimal pendant la résolution
+  // Cacher le splash quand la destination est connue
+  useEffect(() => {
+    if (dest !== null) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [dest]);
+
+  // Écran neutre pendant la décision (dev/web)
   if (dest === null) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc' }}>
-        <ActivityIndicator />
+        <ActivityIndicator size="large" />
       </View>
     );
   }

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import mock from '../assets/data/mockCustomers.json';
+import mockData from '../assets/data/mockCustomers.json';
 
 export type Customer = {
   id: string;
@@ -21,7 +21,6 @@ type Ctx = {
   addCustomer: (c: Partial<Customer>) => void;
   updateCustomer: (id: string, patch: Partial<Customer>) => void;
   deleteCustomer: (id: string) => void;
-  // ✅ ajoute ceci
   loadMock: () => void;
 };
 
@@ -30,15 +29,15 @@ const StoreCtx = createContext<Ctx | null>(null);
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const MOCK_CUSTOMERS = mockData as unknown as Customer[];
 
   useEffect(() => {
     (async () => {
       try {
         const raw = await AsyncStorage.getItem('customers');
-        if (raw) setCustomers(JSON.parse(raw));
-        else setCustomers(mock as any);
-      } catch (_) {
-        setCustomers(mock as any);
+        setCustomers(raw ? JSON.parse(raw) : MOCK_CUSTOMERS);
+      } catch {
+        setCustomers(MOCK_CUSTOMERS);
       } finally {
         setLoaded(true);
       }
@@ -46,10 +45,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (loaded) AsyncStorage.setItem('customers', JSON.stringify(customers));
+    if (!loaded) return;
+    const id = setTimeout(() => {
+      AsyncStorage.setItem('customers', JSON.stringify(customers)).catch(() => {});
+    }, 300);
+    return () => clearTimeout(id);
   }, [customers, loaded]);
 
-  const addCustomer = (c: Partial<Customer>) =>
+  const addCustomer = useCallback((c: Partial<Customer>) => {
     setCustomers((prev) => [
       {
         id: Date.now().toString(),
@@ -63,34 +66,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         retained_90: false,
         payment_amount: 0,
         ...c,
-      } as Customer,
+      },
       ...prev,
     ]);
-
-  const updateCustomer = (id: string, patch: Partial<Customer>) =>
-    setCustomers((prev) => prev.map((v) => (v.id === id ? { ...v, ...patch } : v)));
-
-  const deleteCustomer = (id: string) =>
-    setCustomers((prev) => prev.filter((v) => v.id !== id));
-
-  // ✅ nouvelle action
-  const loadMock = useCallback(() => {
-    setCustomers((mock as unknown as Customer[]) || []);
-    // on peut aussi persister tout de suite si tu veux :
-    AsyncStorage.setItem('customers', JSON.stringify((mock as unknown as Customer[]) || [])).catch(() => {});
   }, []);
 
+  const updateCustomer = useCallback((id: string, patch: Partial<Customer>) => {
+    setCustomers((prev) => prev.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+  }, []);
+
+  const deleteCustomer = useCallback((id: string) => {
+    setCustomers((prev) => prev.filter((v) => v.id !== id));
+  }, []);
+
+  const loadMock = useCallback(() => {
+    setCustomers(MOCK_CUSTOMERS);
+    AsyncStorage.setItem('customers', JSON.stringify(MOCK_CUSTOMERS)).catch(() => {});
+  }, [MOCK_CUSTOMERS]);
+
+  if (!loaded) return null;
+
   return (
-    <StoreCtx.Provider
-      value={{
-        customers,
-        loaded,
-        addCustomer,
-        updateCustomer,
-        deleteCustomer,
-        loadMock, // ✅ expose
-      }}
-    >
+    <StoreCtx.Provider value={{ customers, loaded, addCustomer, updateCustomer, deleteCustomer, loadMock }}>
       {children}
     </StoreCtx.Provider>
   );
