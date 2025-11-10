@@ -20,7 +20,7 @@ import {
   classifyRobust,
   nextRepurchaseEtaDays,
   robustThresholdsFromData,
-  thresholdsFromData
+  thresholdsFromData,
 } from '../../lib/metrics';
 import { useStore } from '../../lib/store';
 
@@ -50,26 +50,23 @@ const RECO_BY_TYPE: Record<Code, string[]> = {
 export default function Analysis() {
   const { customers, loaded, loadMock } = useStore();
 
-  // Seuils (moyenne pour compat + médiane pour robustesse)
+  // seuils (tu peux les garder même si tu n'utilises pas thMean)
   const thMean = useMemo(() => thresholdsFromData(customers || []), [customers]);
   const thRobust = useMemo(() => robustThresholdsFromData(customers || []), [customers]);
 
-  // Form inputs
   const [input, setInput] = useState({ ...DEFAULT_INPUT });
 
-  // Parsing sûr
   const toNumber = (t: string) => {
     const n = Number((t || '').replace(/[^\d.-]/g, ''));
     return Number.isFinite(n) ? n : 0;
   };
 
-  // Classification (robuste) + ETA (avec seuils robustes)
+  // classification entrée
   const robust = classifyRobust({ ...input }, customers || []);
-  // Pour compatibilité avec ton TypeBadge + textes existants
   const result: ClassifyResult = { code: robust.code, label: robust.label, desc: robust.desc };
   const eta = nextRepurchaseEtaDays(input, thRobust);
 
-  // Distribution globale (camembert)
+  // distribution globale
   const dist = useMemo(() => {
     const map: Record<Code, number> = { LOYAL: 0, BROWSER: 0, SNIPER: 0, CHURN: 0 };
     (customers || []).forEach((c: any) => {
@@ -82,6 +79,34 @@ export default function Analysis() {
       { x: '기습형', y: map.SNIPER },
       { x: '이탈형', y: map.CHURN },
     ];
+  }, [customers]);
+
+  // 🔥 KPIs dérivés (ajout retained90Ratio ici)
+  const kpis = useMemo(() => {
+    const total = customers?.length ?? 0;
+    if (!customers || total === 0) {
+      return {
+        total,
+        loyalRatio: 0,
+        churnRatio: 0,
+        retained90Ratio: 0,
+      };
+    }
+    let loyal = 0;
+    let churn = 0;
+    let retained90 = 0;
+    customers.forEach((c: any) => {
+      const r = classifyRobust(c, customers);
+      if (r.code === 'LOYAL') loyal += 1;
+      if (r.code === 'CHURN') churn += 1;
+      if (c.retained_90) retained90 += 1;
+    });
+    return {
+      total,
+      loyalRatio: Math.round((loyal / total) * 100),
+      churnRatio: Math.round((churn / total) * 100),
+      retained90Ratio: Math.round((retained90 / total) * 100),
+    };
   }, [customers]);
 
   const empty = !customers || customers.length === 0;
@@ -100,157 +125,173 @@ export default function Analysis() {
   }
 
   return (
-    // marge bas pour ne pas être sous la FloatingBar
-    <Screen scroll extraBottom={90}>
+    <Screen scroll extraBottom={90} style={{ backgroundColor: '#eef2f7' }}>
       <TopBar title="유형 분석" />
 
-      <ScrollView style={{ paddingHorizontal: 0 }} contentContainerStyle={{ paddingBottom: 24 }}>
-        <Text style={styles.h2}>입력값 → 유형</Text>
-
-        {/* Champs numériques */}
-        <View style={styles.row}>
-          <TextInput
-            style={styles.input}
-            keyboardType="numeric"
-            placeholder="출석일수"
-            value={String(input.visit_days)}
-            onChangeText={(t) => setInput((p) => ({ ...p, visit_days: toNumber(t) }))}
-          />
-          <TextInput
-            style={styles.input}
-            keyboardType="numeric"
-            placeholder="체류시간(분)"
-            value={String(input.avg_duration_min)}
-            onChangeText={(t) => setInput((p) => ({ ...p, avg_duration_min: toNumber(t) }))}
-          />
+      {/* KPI banner (scrollable pour 4 cartes) */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.kpiScroll}
+        contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+      >
+        <View style={[styles.kpiCard, { backgroundColor: '#ffffff' }]}>
+          <Text style={styles.kpiLabel}>총 고객수</Text>
+          <Text style={styles.kpiValue}>{kpis.total}</Text>
+          <Text style={styles.kpiHelp}>현재 스토어에 적재된 고객 수</Text>
         </View>
-
-        {/* Switch booléens */}
-        <View style={styles.switchRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.switchLabel}>6~8월 재구매</Text>
-            <Text style={styles.switchHelp}>여름 시즌에 재구매 여부</Text>
-          </View>
-          <Switch
-            value={input.retained_june_august}
-            onValueChange={(v) => setInput((p) => ({ ...p, retained_june_august: v }))}
-          />
+        <View style={[styles.kpiCard, { backgroundColor: '#ecfdf3', borderColor: '#bbf7d0' }]}>
+          <Text style={styles.kpiLabel}>충성형 비율</Text>
+          <Text style={styles.kpiValue}>{kpis.loyalRatio}%</Text>
+          <Text style={styles.kpiHelp}>리워드/업셀 대상</Text>
         </View>
-
-        <View style={styles.switchRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.switchLabel}>90일내 재구매</Text>
-            <Text style={styles.switchHelp}>최근 90일 내 재구매 여부</Text>
-          </View>
-          <Switch
-            value={input.retained_90}
-            onValueChange={(v) => setInput((p) => ({ ...p, retained_90: v }))}
-          />
+        <View style={[styles.kpiCard, { backgroundColor: '#fff7ed', borderColor: '#ffedd5' }]}>
+          <Text style={styles.kpiLabel}>이탈 위험</Text>
+          <Text style={[styles.kpiValue, { color: '#c05621' }]}>{kpis.churnRatio}%</Text>
+          <Text style={styles.kpiHelp}>복귀 캠페인 우선 대상</Text>
         </View>
-
-        {/* Presets rapides */}
-        <View style={styles.presetsRow}>
-          {QUICK_PRESETS.map((p) => (
-            <Pressable
-              key={p.name}
-              onPress={() =>
-                setInput((prev) => ({
-                  ...prev,
-                  visit_days: p.visit_days,
-                  avg_duration_min: p.avg_duration_min,
-                }))
-              }
-              style={({ pressed }) => [styles.presetBtn, pressed && { opacity: 0.85 }]}
-            >
-              <Text style={styles.presetText}>{p.name}</Text>
-            </Pressable>
-          ))}
+        <View style={[styles.kpiCard, { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }]}>
+          <Text style={styles.kpiLabel}>90일내 재구매</Text>
+          <Text style={[styles.kpiValue, { color: '#1d4ed8' }]}>{kpis.retained90Ratio}%</Text>
+          <Text style={styles.kpiHelp}>최근 3개월 내 재방문 고객</Text>
         </View>
+      </ScrollView>
 
-        {/* Résumé + actions */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryHeader}>
-            <Text style={styles.h3}>요약</Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Pressable
-                onPress={resetInputs}
-                accessibilityRole="button"
-                style={({ pressed }) => [styles.resetBtn, pressed && { opacity: 0.9 }]}
-              >
-                <Text style={styles.resetText}>초기화</Text>
-              </Pressable>
+      {/* sous-titre */}
+      <View style={styles.subHeader}>
+        <Text style={styles.subHeaderTitle}>고객 행동 기반 MBTI 분석</Text>
+        <Text style={styles.subHeaderDesc}>
+          출석일수, 체류시간, 재구매 여부를 입력하면 고객 유형과 추천 액션이 자동으로 생성됩니다.
+        </Text>
+      </View>
 
-              <Pressable
-                onPress={loadMock}
-                accessibilityRole="button"
-                style={({ pressed }) => [styles.fillBtn, pressed && { opacity: 0.95 }]}
-              >
-                <Text style={styles.fillText}>예시 채우기</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {/* Chips */}
-          <View style={styles.chipsRow}>
-            <View style={styles.chip}>
-              <Text style={styles.chipKey}>출석일수</Text>
-              <Text style={styles.chipVal}>{input.visit_days}일</Text>
-            </View>
-            <View style={styles.chip}>
-              <Text style={styles.chipKey}>체류시간</Text>
-              <Text style={styles.chipVal}>{input.avg_duration_min}분</Text>
-            </View>
-            <View style={styles.chip}>
-              <Text style={styles.chipKey}>6~8월 재구매</Text>
-              <Text style={[styles.chipVal, input.retained_june_august ? styles.ok : styles.no]}>
-                {input.retained_june_august ? '예' : '아니오'}
-              </Text>
-            </View>
-            <View style={styles.chip}>
-              <Text style={styles.chipKey}>90일내 재구매</Text>
-              <Text style={[styles.chipVal, input.retained_90 ? styles.ok : styles.no]}>
-                {input.retained_90 ? '예' : '아니오'}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Résultat typologie */}
+      <ScrollView contentContainerStyle={{ paddingBottom: 32, gap: 14 }}>
+        {/* 1. Input */}
         <View style={styles.card}>
-          <Text style={styles.h3}>결과</Text>
-          {/* TypeBadge: garde ton API (type + label) */}
-          <TypeBadge type={result.code} label={`당신은 ${result.label} 고객입니다!`} />
-          {!!result.desc && <Text style={{ marginTop: 8, color: '#475569' }}>{result.desc}</Text>}
-          {/* Explication robuste (facultatif, utile pour démo) */}
-          {!!robust?.why && (
-            <Text style={{ marginTop: 6, color: '#64748b' }}>
-              근거: {robust.why}
-            </Text>
-          )}
-          <Text style={{ marginTop: 6, fontWeight: '600' }}>다음 재구매 예상: {eta}일 내</Text>
-        </View>
+          <Text style={styles.sectionLabel}>1. 입력값</Text>
+          <Text style={styles.sectionDesc}>실제 고객 데이터를 대입하거나 아래 프리셋을 눌러보세요.</Text>
 
-        {/* Recos par type */}
-        <View style={styles.card}>
-          <Text style={styles.h3}>추천 액션</Text>
-          {RECO_BY_TYPE[result.code].map((t) => (
-            <Text key={t} style={styles.recoItem}>• {t}</Text>
-          ))}
-        </View>
+          <View style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.inputLabel}>출석일수</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                value={String(input.visit_days)}
+                onChangeText={(t) => setInput((p) => ({ ...p, visit_days: toNumber(t) }))}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.inputLabel}>체류시간(분)</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                value={String(input.avg_duration_min)}
+                onChangeText={(t) => setInput((p) => ({ ...p, avg_duration_min: toNumber(t) }))}
+              />
+            </View>
+          </View>
 
-        {/* Global pie */}
-        <Text style={[styles.h2, { marginTop: 16 }]}>전체 고객 분포</Text>
-        <View style={styles.pieCard}>
-          {empty ? (
-            <Text style={{ color: '#64748b' }}>데이터가 없습니다.</Text>
-          ) : (
-            <VictoryPie
-              data={dist}
-              innerRadius={60}
-              padAngle={2}
-              labels={({ datum }) => `${datum.x} ${datum.y}`}
+          <View style={styles.switchRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.switchLabel}>6~8월 재구매</Text>
+              <Text style={styles.switchHelp}>여름 시즌에 재구매 여부</Text>
+            </View>
+            <Switch
+              value={input.retained_june_august}
+              onValueChange={(v) => setInput((p) => ({ ...p, retained_june_august: v }))}
             />
+          </View>
+
+          <View style={styles.switchRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.switchLabel}>90일내 재구매</Text>
+              <Text style={styles.switchHelp}>최근 90일 내 재구매 여부</Text>
+            </View>
+            <Switch
+              value={input.retained_90}
+              onValueChange={(v) => setInput((p) => ({ ...p, retained_90: v }))}
+            />
+          </View>
+
+          <View style={styles.presetsRow}>
+            {QUICK_PRESETS.map((p) => (
+              <Pressable
+                key={p.name}
+                onPress={() =>
+                  setInput((prev) => ({
+                    ...prev,
+                    visit_days: p.visit_days,
+                    avg_duration_min: p.avg_duration_min,
+                  }))
+                }
+                style={({ pressed }) => [styles.presetBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Text style={styles.presetText}>{p.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <View style={styles.actionsRow}>
+            <Pressable onPress={resetInputs} style={({ pressed }) => [styles.resetBtn, pressed && { opacity: 0.9 }]}>
+              <Text style={styles.resetText}>초기화</Text>
+            </Pressable>
+            <Pressable onPress={loadMock} style={({ pressed }) => [styles.fillBtn, pressed && { opacity: 0.9 }]}>
+              <Text style={styles.fillText}>예시 데이터 불러오기</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {/* 2. Résultat */}
+        <View style={styles.card}>
+          <Text style={styles.sectionLabel}>2. 분석 결과</Text>
+          <Text style={styles.sectionDesc}>입력값을 기준으로 현재 고객의 행동 유형을 진단합니다.</Text>
+
+          <TypeBadge type={result.code} label={`당신은 ${result.label} 고객입니다!`} />
+
+          {!!result.desc && <Text style={styles.descText}>{result.desc}</Text>}
+
+          {!!robust?.why && (
+            <View style={styles.insightBox}>
+              <Text style={styles.insightTitle}>분류 근거</Text>
+              <Text style={styles.insightText}>{robust.why}</Text>
+            </View>
           )}
+
+          <View style={styles.etaBox}>
+            <Text style={styles.etaLabel}>다음 재구매 예상 시점</Text>
+            <Text style={styles.etaValue}>{eta}일 이내</Text>
+            <Text style={styles.etaHelp}>이 시점에 맞춰 캠페인을 발송하면 효율이 높습니다.</Text>
+          </View>
+        </View>
+
+        {/* 3. Recos */}
+        <View style={styles.card}>
+          <Text style={styles.sectionLabel}>3. 추천 액션</Text>
+          <Text style={styles.sectionDesc}>해당 유형 고객에게 가장 효과적인 캠페인 예시입니다.</Text>
+          {RECO_BY_TYPE[result.code].map((t) => (
+            <Text key={t} style={styles.recoItem}>
+              • {t}
+            </Text>
+          ))}
+        </View>
+
+        {/* 4. Pie */}
+        <View style={styles.card}>
+          <Text style={styles.sectionLabel}>4. 전체 고객 분포</Text>
+          <Text style={styles.sectionDesc}>현재 보유 중인 고객이 어떤 유형에 많이 분포하는지 확인하세요.</Text>
+          <View style={styles.pieCard}>
+            {empty ? (
+              <Text style={{ color: '#64748b' }}>데이터가 없습니다.</Text>
+            ) : (
+              <VictoryPie
+                data={dist}
+                innerRadius={60}
+                padAngle={2}
+                labels={({ datum }) => `${datum.x} ${datum.y}`}
+              />
+            )}
+          </View>
         </View>
       </ScrollView>
     </Screen>
@@ -261,39 +302,80 @@ const styles = StyleSheet.create({
   loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   loadingText: { color: '#64748b' },
 
-  h2: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
-  h3: { fontSize: 15, fontWeight: '700' },
+  // KPI scrollable
+  kpiScroll: {
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  kpiCard: {
+    width: 160,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  kpiLabel: { fontSize: 11, color: '#64748b', fontWeight: '600' },
+  kpiValue: { fontSize: 20, fontWeight: '800', color: '#0f172a', marginTop: 2 },
+  kpiHelp: { fontSize: 10, color: '#94a3b8', marginTop: 4 },
 
-  row: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  subHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  subHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  subHeaderDesc: {
+    marginTop: 4,
+    color: '#64748b',
+    fontSize: 12,
+  },
+
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginHorizontal: 16,
+    padding: 14,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  sectionLabel: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
+  sectionDesc: { fontSize: 12, color: '#94a3b8' },
+
+  row: { flexDirection: 'row', gap: 12, marginTop: 4 },
+  inputLabel: { fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 },
   input: {
-    flex: 1,
     backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#e5e7eb',
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 10,
-    height: 44,
+    height: 42,
   },
 
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
+    backgroundColor: '#f8fafc',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#e2e8f0',
     borderRadius: 12,
-    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   switchLabel: { fontWeight: '700', color: '#0f172a' },
-  switchHelp: { color: '#64748b', fontSize: 12, marginTop: 2 },
+  switchHelp: { color: '#94a3b8', fontSize: 11, marginTop: 2 },
 
-  presetsRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  presetsRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
   presetBtn: {
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: '#c7d2fe',
@@ -301,63 +383,56 @@ const styles = StyleSheet.create({
   },
   presetText: { fontWeight: '700', color: '#3730a3', fontSize: 12 },
 
-  summaryCard: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-  },
-  summaryHeader: {
+  actionsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 10,
   },
-
   resetBtn: {
-    paddingHorizontal: 12,
+    flex: 1,
+    alignItems: 'center',
     paddingVertical: 8,
     borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
     backgroundColor: '#f1f5f9',
   },
   resetText: { fontWeight: '700', color: '#0f172a', fontSize: 12 },
-
   fillBtn: {
-    paddingHorizontal: 12,
+    flex: 1,
+    alignItems: 'center',
     paddingVertical: 8,
     borderRadius: 999,
+    backgroundColor: '#eef2ff',
     borderWidth: 1,
     borderColor: '#c7d2fe',
-    backgroundColor: '#eef2ff',
   },
   fillText: { fontWeight: '700', color: '#3730a3', fontSize: 12 },
 
-  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#f8fafc',
-  },
-  chipKey: { fontSize: 11, color: '#64748b' },
-  chipVal: { fontSize: 12, fontWeight: '700', color: '#0f172a' },
-  ok: { color: '#166534' },
-  no: { color: '#7f1d1d' },
+  descText: { marginTop: 6, color: '#475569', fontSize: 12, lineHeight: 18 },
 
-  card: {
-    backgroundColor: '#fff',
+  insightBox: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 8,
+    borderColor: '#e2e8f0',
+    padding: 10,
+    marginTop: 6,
   },
-  recoItem: { color: '#334155', marginTop: 6 },
+  insightTitle: { fontWeight: '700', color: '#0f172a', marginBottom: 2, fontSize: 12 },
+  insightText: { color: '#64748b', fontSize: 12 },
+
+  etaBox: {
+    marginTop: 8,
+    backgroundColor: '#ecfdf3',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    borderRadius: 12,
+    padding: 10,
+  },
+  etaLabel: { fontSize: 11, color: '#166534', fontWeight: '600' },
+  etaValue: { fontSize: 20, fontWeight: '800', color: '#166534', marginTop: 2 },
+  etaHelp: { fontSize: 11, color: '#166534', marginTop: 3 },
+
+  recoItem: { color: '#334155', marginTop: 4, fontSize: 12 },
 
   pieCard: {
     backgroundColor: '#fff',
